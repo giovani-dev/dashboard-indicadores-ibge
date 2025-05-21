@@ -6,6 +6,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 
+def convert_string_to_quarter(quarter):
+    quarter = quarter.replace("trimestre", "Q").replace("º", "")
+    quarter, q, year = quarter.split(" ")
+    return f"{year}{q}{quarter}"
+
+
 def convert_to_datetime(month_year):
     get_month = {
         "janeiro": 1,
@@ -36,6 +42,10 @@ ipca = pd.read_csv("./static/IPCA-serie-histórica.csv")
 rendimento_mensal = pd.read_csv(
     "./static/rendimento-medio-mensal-real-trabalhadores.csv"
 )
+rendimento_mensal["Trimestre"] = rendimento_mensal["Trimestre"].apply(lambda quarter: convert_string_to_quarter(quarter))
+rendimento_mensal = rendimento_mensal[rendimento_mensal["Nível de instrução"] != "Total"]
+rendimento_mensal["Valor"] = rendimento_mensal["Valor"].replace("-", "0")
+rendimento_mensal["Valor"] = pd.to_numeric(rendimento_mensal["Valor"]).fillna(0).astype(int)
 
 custo_medio_m2 = custo_medio_m2.rename(
     columns={
@@ -59,27 +69,25 @@ df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
 
 df["Trimestre"] = df["Data"].dt.to_period("Q").astype(str)
 
-quarter = st.sidebar.selectbox(
-    "Trimestres disponiveis", df["Trimestre"].dropna().unique(), index=None
+quarter = st.sidebar.multiselect(
+    "Selecione um ou mais trimestres", ["Q1", "Q2", "Q3", "Q4"], #index=None
 )
+year = st.sidebar.multiselect("Selecione o ano que deseja filtrar", list(range(1980, 2025)))
+
+quarter_list = [f"{_year}{_quarter}" for _year in year for _quarter in quarter]
+
 start_date = st.sidebar.date_input("Seleciona a data inicial", value=None)
 end_date = st.sidebar.date_input("Seleciona a data final", value=None)
-instruction_level = st.sidebar.selectbox(
-    "Selecione o nivel de instrução",
-    rendimento_mensal[rendimento_mensal["Nível de instrução"] != "Total"][
-        "Nível de instrução"
-    ].unique(),
-    index=None,
-)
-if quarter:
-    df = df[df["Trimestre"] == quarter]
+if quarter_list:
+    df = pd.concat([df[df["Trimestre"] == _quarter] for _quarter in quarter_list])
+    # df.drop_duplicates()
+    rendimento_mensal = [rendimento_mensal[rendimento_mensal["Trimestre"] == _quarter ] for _quarter in quarter_list]
 if start_date and end_date:
     df = df[(df["Data"].dt.date >= start_date) & (df["Data"].dt.date <= end_date)]
 if start_date and not end_date:
     df = df[df["Data"].dt.date >= start_date]
 if not start_date and end_date:
     df = df[df["Data"].dt.date <= end_date]
-
 
 col1, col2 = st.columns(2)
 
@@ -118,3 +126,33 @@ preco_m2_graph = px.line(
     markers=True,
 )
 col2.plotly_chart(preco_m2_graph)
+
+col3, col4 = st.columns(2)
+
+instruction_level = st.sidebar.selectbox(
+    "Selecione o nivel de instrução",
+    rendimento_mensal[rendimento_mensal["Nível de instrução"] != "Total"][
+        "Nível de instrução"
+    ].unique(),
+    index=None,
+)
+if instruction_level:
+    rendimento_mensal = rendimento_mensal[rendimento_mensal["Nível de instrução"] == instruction_level]
+trace = rendimento_mensal["Nível de instrução"].value_counts()
+
+instruction_graph = px.line(
+    rendimento_mensal,
+    x="Nível de instrução",
+    y="Valor",
+    # color="Valor",
+    title="Rendimento médio por nivel de instrução (Economia)",
+)
+# instruction_graph.add_trace(
+#     go.Scatter(
+#         x=trace.index,
+#         y=trace.values,
+#         name="Quantidade por nivel de instrução",
+#         marker=dict(color="red"),
+#     )
+# )
+col3.plotly_chart(instruction_graph)
